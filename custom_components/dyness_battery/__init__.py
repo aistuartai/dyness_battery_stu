@@ -64,6 +64,7 @@ SCHEMA_UNKNOWN      = "unknown"
 _MODEL_SCHEMA_MAP: dict[str, str] = {
     # Tower Familie — exakte Namen aus API verifiziert
     "TOWER-T14":        SCHEMA_TOWER,
+    "TOWER-T17":        SCHEMA_TOWER,   # modelCode 26, verifiziert via Log (#31)
     "TOWER-PRO-TP7":    SCHEMA_TOWER,   # "Tower Pro TP7"  → TOWER-PRO-TP7
     "TOWER-PRO-TP11":   SCHEMA_TOWER,   # "Tower Pro TP11" → TOWER-PRO-TP11
     "TOWER-PRO-TP15":   SCHEMA_TOWER,   # "Tower Pro TP15" → TOWER-PRO-TP15
@@ -427,12 +428,10 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                             # Sub-Modul Discovery — bei jedem Update prüfen ob neue Module dazugekommen sind
                             sub_raw = self.realtime_data.get("SUB", "")
                             if sub_raw:
-                                import re
                                 candidates = [s.strip() for s in str(sub_raw).split(",") if s.strip()]
                                 candidates = [
                                     s for s in candidates
                                     if not s.endswith(_BMS_SUFFIXES)
-                                    and not re.search(r'-BDU-\d+$', s)
                                 ]
                                 if len(candidates) > 1:
                                     if set(candidates) != set(self._module_sns):
@@ -858,11 +857,18 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                     elif schema == SCHEMA_POWERDEPOT:
                         # PowerDepot G2 Schema (modelCode 144) — vollständig verifiziert
                         # Point 400 = Modulanzahl direkt vom BMS → robuster als _module_sns
+                        # batteryCapacity ZUERST setzen damit usableKwh korrekt rechnet
                         n_mod_bms = _to_float(rt.get("400"))
                         if n_mod_bms is not None and n_mod_bms > 0:
                             bc_single = _to_float(self.station_info.get("batteryCapacity"))
                             if bc_single is not None:
                                 data["batteryCapacity"] = round(bc_single * int(n_mod_bms), 3)
+                        elif data.get("batteryCapacity") is None:
+                            # Fallback: _module_sns Anzahl wenn Point 400 leer
+                            bc_single = _to_float(self.station_info.get("batteryCapacity"))
+                            n_mods = max(len(self._module_sns), 1)
+                            if bc_single is not None and n_mods > 1:
+                                data["batteryCapacity"] = round(bc_single * n_mods, 3)
 
                         data["packVoltage"] = rt.get("600") if rt.get("600") is not None else data.get("packVoltage")
                         data["realTimeCurrent"]      = rt.get("700")
@@ -895,7 +901,7 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                         if dl is not None and dl > 0:
                             data["dischargeCurrentLimit"] = dl
 
-                        # Kapazität aus BMS-Modulanzahl (robust gegen leere _module_sns)
+                        # Kapazität aus BMS-Modulanzahl
                         bc  = _to_float(data.get("batteryCapacity"))
                         soc_pd = _to_float(rt.get("800"))
                         soh_pd = _to_float(rt.get("1200"))
@@ -904,11 +910,55 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                             data["usableKwh"]    = round(bc * soh_factor, 3)
                             data["remainingKwh"] = round(bc * soh_factor * soc_pd / 100, 3)
 
+                        # cycleCount aus Sub-Modul-Daten aggregieren (Point 13900)
+                        # kein Master-Point verfügbar → Mittelwert über alle Module
+                        mod_cycles = [
+                            _to_float(m.get("cycleCount"))
+                            for m in (data.get("module_data") or {}).values()
+                            if m.get("cycleCount") is not None
+                        ]
+                        if mod_cycles:
+                            data["cycleCount"] = round(sum(mod_cycles) / len(mod_cycles), 0)
+
+                        # temp (Durchschnitt) aus Sub-Modul-Daten
+                        mod_temps = [
+                            _to_float(m.get("temp"))
+                            for m in (data.get("module_data") or {}).values()
+                            if m.get("temp") is not None
+                        ]
+                        if mod_temps:
+                            data["temp"] = round(sum(mod_temps) / len(mod_temps), 1)
+
+                        # workStatus: storage/list liefert manchmal "Fault" fälschlicherweise
+                        # wenn alle Alarm-Bits 0 sind → Override auf "Standby"/"Normal"
+                        alarm_bits = [
+                            rt.get("3200"), rt.get("3201"), rt.get("3300"),
+                            rt.get("3400"), rt.get("3500"),
+                        ]
+                        all_clear = all(
+                            v is None or str(v) in ("0", "0.0", "")
+                            for v in alarm_bits
+                        )
+                        if all_clear and data.get("workStatus") == "Fault":
+                            data["workStatus"] = "Standby"
+                            _LOGGER.debug(
+                                "Dyness PowerDepot G2: workStatus 'Fault' korrigiert zu 'Standby' "
+                                "— alle Alarm-Bits sind 0"
+                            )
+
+                        # Alarm-Sensoren
+                        data["alarmSpreadV"] = str(rt.get("3200", "0")) != "0"
+                        data["alarmSpreadT"] = str(rt.get("3201", "0")) != "0"
+                        data["alarmInsul"]   = str(rt.get("3300", "0")) != "0"
+                        data["alarmAfe"]     = str(rt.get("3400", "0")) != "0"
+                        data["alarmSys"]     = str(rt.get("3500", "0")) != "0"
+                        data["alarmTotal"]   = rt.get("9999999")
+
                         _LOGGER.debug(
                             "Dyness PowerDepot G2: n_modules=%s, batteryCapacity=%s kWh, "
-                            "SOC=%s%%, packVoltage=%s V, tempMosfet=%s°C",
+                            "SOC=%s%%, usableKwh=%s kWh, workStatus=%s",
                             n_mod_bms, data.get("batteryCapacity"),
-                            soc_pd, data.get("packVoltage"), data.get("tempMosfet"),
+                            soc_pd, data.get("usableKwh"), data.get("workStatus"),
                         )
 
                     elif schema == SCHEMA_CYGNI:
@@ -1353,6 +1403,10 @@ def _parse_module_points(sn: str, mid: str, pts: dict) -> dict:
         d["cell_temp_2"] = _to_float(g("12600"))
         d["voltage"]     = _to_float(g("13500"))
         d["current"]     = _to_float(g("13400"))
+        # Firmware per Sub-Modul (Point 10100) — PowerBox G2 hat zwei verschiedene Versionen
+        fw = pts.get("10100")
+        if fw:
+            d["firmwareVersion"] = str(fw)
         cells = []
         for i in range(1, 17):
             pid = str(10200 + i * 100)
