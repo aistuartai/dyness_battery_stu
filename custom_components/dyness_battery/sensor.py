@@ -105,17 +105,50 @@ ALWAYS_REGISTER = {
     "workStatus", "batteryStatus",
 }
 
+# Alarm-Sensoren die nur für bestimmte Schemas implementiert sind.
+# Für alle anderen Schemas werden diese Entities gar nicht registriert
+# → kein dauerhaftes Unavailable mehr.
+_ALARM_SENSOR_KEYS = {
+    "alarmSpreadV", "alarmSpreadT", "alarmInsul",
+    "alarmAfe", "alarmBms", "alarmSys", "alarmTotal",
+}
+
+# Schemas die Alarm-Sensoren implementieren
+_ALARM_SCHEMAS = {
+    "tower", "stack100", "powerdepot", "powerbox_pro",
+    "powerbox_g2", "junior", "dl5",
+}
+
+# tempMax / tempMin nur für Schemas die sie tatsächlich setzen
+_TEMP_MAXMIN_KEYS = {"tempMax", "tempMin"}
+_TEMP_MAXMIN_SCHEMAS = {
+    "tower", "stack100", "powerdepot", "powerbox_pro",
+    "powerbox_g2", "dl5",
+}
+
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     available_data = coordinator.data or {}
+    schema = available_data.get("_schema", "unknown")
 
-    # Pack-Level Sensoren
+    # Pack-Level Sensoren — schema-basiert filtern
     async_add_entities([
         DynessSensor(coordinator, entry, key, translation_key,
                      unit, device_class, state_class, icon, precision, entity_category)
         for key, translation_key, unit, device_class, state_class, icon, precision, entity_category in SENSORS
-        if key in ALWAYS_REGISTER or available_data.get(key) is not None
+        if (
+            key in ALWAYS_REGISTER
+            or (
+                # Alarm-Sensoren nur für Schemas die sie implementieren
+                key not in _ALARM_SENSOR_KEYS
+                or schema in _ALARM_SCHEMAS
+            ) and (
+                # tempMax/tempMin nur für Schemas die sie setzen
+                key not in _TEMP_MAXMIN_KEYS
+                or schema in _TEMP_MAXMIN_SCHEMAS
+            ) and available_data.get(key) is not None
+        )
     ])
 
     # Modul-Sensoren — dynamisch bei jedem neuen Modul registrieren

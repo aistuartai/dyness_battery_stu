@@ -594,6 +594,12 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                     data["_schema"] = schema
                     _LOGGER.debug("Dyness: Schema erkannt: %s", schema)
 
+                    # PowerBox G2: firmware aus storage_info (device_info liefert null)
+                    if schema == SCHEMA_POWERBOX_G2:
+                        fw = self.storage_info.get("firmwareVersion")
+                        if fw:
+                            data["firmwareVersion"] = fw
+
                     # batteryCapacity:
                     # - Stack100 + Tower: direkt aus BMS-Point (1700) — überschreibt station_info.
                     #   station_info kann veraltet sein (z.B. nach Modulerweiterung 7→13 Module).
@@ -929,30 +935,40 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                         if mod_temps:
                             data["temp"] = round(sum(mod_temps) / len(mod_temps), 1)
 
-                        # workStatus: storage/list liefert manchmal "Fault" fälschlicherweise
-                        # wenn alle Alarm-Bits 0 sind → Override auf "Standby"/"Normal"
-                        alarm_bits = [
-                            rt.get("3200"), rt.get("3201"), rt.get("3300"),
-                            rt.get("3400"), rt.get("3500"),
-                        ]
-                        all_clear = all(
-                            v is None or str(v) in ("0", "0.0", "")
-                            for v in alarm_bits
-                        )
-                        if all_clear and data.get("workStatus") == "Fault":
-                            data["workStatus"] = "Standby"
-                            _LOGGER.debug(
-                                "Dyness PowerDepot G2: workStatus 'Fault' korrigiert zu 'Standby' "
-                                "— alle Alarm-Bits sind 0"
+                        # workStatus: aus batteryStatus ableiten statt aus storage/list
+                        # storage/list zeigt "Fault" obwohl Gerät normal lädt/entlädt
+                        battery_status_pd = data.get("batteryStatus")
+                        if battery_status_pd == "Charging":
+                            data["workStatus"] = "Charging"
+                        elif battery_status_pd == "Discharging":
+                            data["workStatus"] = "Discharging"
+                        else:
+                            alarm_bits_pd = [
+                                rt.get("3200"), rt.get("3201"), rt.get("3202"),
+                                rt.get("3300"), rt.get("3400"), rt.get("3500"),
+                            ]
+                            all_clear_pd = all(
+                                v is None or str(v) in ("0", "0.0", "")
+                                for v in alarm_bits_pd
                             )
+                            if all_clear_pd and data.get("workStatus") == "Fault":
+                                data["workStatus"] = "Standby"
+                                _LOGGER.debug(
+                                    "Dyness PowerDepot G2: workStatus 'Fault' → 'Standby' "
+                                    "— alle Alarm-Bits sind 0"
+                                )
 
-                        # Alarm-Sensoren
-                        data["alarmSpreadV"] = str(rt.get("3200", "0")) != "0"
-                        data["alarmSpreadT"] = str(rt.get("3201", "0")) != "0"
-                        data["alarmInsul"]   = str(rt.get("3300", "0")) != "0"
+                        # Alarm-Sensoren — korrekte Point-Mappings (verifiziert)
+                        # 3200 = Sammelbyte 1, 3201=Voltage Spread, 3202=MOSFET Temp
+                        # 3300 = Sammelbyte 2, 3400=AFE Comm, 3500=System Fault
+                        data["alarmStatus"]  = (
+                            str(rt.get("3200", "0")) != "0"
+                            or str(rt.get("3300", "0")) != "0"
+                        )
+                        data["alarmSpreadV"] = str(rt.get("3201", "0")) != "0"
+                        data["alarmSpreadT"] = str(rt.get("3202", "0")) != "0"
                         data["alarmAfe"]     = str(rt.get("3400", "0")) != "0"
                         data["alarmSys"]     = str(rt.get("3500", "0")) != "0"
-                        data["alarmTotal"]   = rt.get("9999999")
 
                         _LOGGER.debug(
                             "Dyness PowerDepot G2: n_modules=%s, batteryCapacity=%s kWh, "
