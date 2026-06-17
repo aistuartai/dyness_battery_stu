@@ -17,16 +17,16 @@ import hashlib, hmac, base64, json, requests
 from email.utils import formatdate
 
 # ===== FILL IN YOUR CREDENTIALS =====
-API_ID     = "YOUR_API_ID"
-API_SECRET = "YOUR_API_SECRET"
-DEVICE_SN  = "YOUR_DEVICE_SN"   # e.g. "CY123456789"
+API_ID     = "129804976277040"
+API_SECRET = "d48c1f308a9df663858fdc08d2a53ac"
+DEVICE_SN  = "6HA1011010KW258250005"   # e.g. "CY123456789"
 # =====================================
 
 # EU endpoint — change if in another region
-API_BASE_V2 = "https://eu-openapi.dyness.com/openapi/emsdevice"
+# API_BASE_V2 = "https://eu-openapi.dyness.com/openapi/emsdevice"
 
 # Other regions:
-# API_BASE_V2 = "https://apacopen-api.dyness.com/openapi/emsdevice"  # Asia-Pacific
+API_BASE_V2 = "https://apacopen-api.dyness.com/openapi/emsdevice"  # Asia-Pacific
 # API_BASE_V2 = "https://open-api.dyness.com/openapi/emsdevice"      # fallback
 
 
@@ -79,17 +79,29 @@ if __name__ == "__main__":
     print(f"\nDevice SN : {DEVICE_SN}")
     print(f"API Base  : {API_BASE_V2}")
 
-    rt = call(
-        "GetRealTimeDataBySN  (v2/cygni/realtime)",
-        "/v2/cygni/GetRealTimeDataBySN",
-        {"sn": DEVICE_SN},
-    )
+    # Discover correct SN format and whether v2 is available
+    import re as _re
+    sn_candidates = [DEVICE_SN]
+    sn_base = _re.sub(r'-(BMS|BDU|INV|EMS)$', '', DEVICE_SN)
+    if sn_base != DEVICE_SN:
+        sn_candidates.insert(0, sn_base)
 
-    call(
-        "GetStatusInfBySN  (v2/cygni/status)",
-        "/v2/cygni/GetStatusInfBySN",
-        {"sn": DEVICE_SN},
-    )
+    print(f"\nProbing v2 SN format candidates: {sn_candidates}")
+    working_sn = DEVICE_SN
+    for candidate in sn_candidates:
+        probe = call(f"GetDeviceInfBySN (probe, sn={candidate})",
+                     "/v2/GetDeviceInfBySN", {"deviceSn": candidate})
+        if probe.get("code") == "00000":
+            working_sn = candidate
+            print(f"  -> v2 working SN: {working_sn}")
+            break
+    else:
+        print("  -> v2 device discovery failed — trying GetRealTimeDataBySN anyway")
+
+    body = {"deviceSn": working_sn}
+
+    rt = call("GetRealTimeDataBySN  (/v2/GetRealTimeDataBySN)", "/v2/GetRealTimeDataBySN", body)
+    call("GetStatusInfBySN  (/v2/GetStatusInfBySN)", "/v2/GetStatusInfBySN", body)
 
     # If realtime call succeeded, show which integration fields will be populated
     if rt.get("code") == "00000" and rt.get("data"):

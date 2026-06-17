@@ -261,6 +261,7 @@ class DynessDataCoordinator(DataUpdateCoordinator):
         self.running_data: dict = {}             # getLastRunningDataBySn
         self.v2_realtime_data: dict = {}         # GetRealTimeDataBySN (v2)
         self.v2_status_data: dict = {}           # GetStatusInfBySN (v2)
+        self._v2_unavailable: bool = False       # True after first 404 — skip until reset
 
         self._bound: bool = False
         self._bound_sns: set = set()  # Bereits gebundene Sub-Modul SNs
@@ -566,28 +567,31 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                     except Exception as e:
                         _LOGGER.warning("Dyness getLastRunningDataBySn nicht erreichbar: %s", e)
 
-                    # ── v2 API Daten (alle 3 Zyklen) ─────────────────────────
+                    # ── v2 API Daten (alle 3 Zyklen, skip if unavailable) ────
                     self._v2_cycle = (self._v2_cycle + 1) % 3
-                    if self._v2_cycle == 0 or not self.v2_realtime_data:
+                    if not self._v2_unavailable and (self._v2_cycle == 0 or not self.v2_realtime_data):
+                        v2_body = {"deviceSn": self.device_sn}
                         try:
-                            v2_body = {"sn": self.device_sn}
                             v2_result = await self._call_v2(
                                 session, "/v2/GetRealTimeDataBySN", v2_body
                             )
                             if _is_success(v2_result):
                                 self.v2_realtime_data = v2_result.get("data", {}) or {}
+                            elif v2_result.get("status") == 404 or v2_result.get("code") == "404":
+                                _LOGGER.info("Dyness v2 API not available on this server/account — skipping v2 sensors")
+                                self._v2_unavailable = True
                         except Exception as e:
-                            _LOGGER.warning("Dyness v2 GetRealTimeDataBySN nicht erreichbar: %s", e)
+                            _LOGGER.debug("Dyness v2 GetRealTimeDataBySN: %s", e)
 
-                        try:
-                            v2_body = {"sn": self.device_sn}
-                            v2_result = await self._call_v2(
-                                session, "/v2/GetStatusInfBySN", v2_body
-                            )
-                            if _is_success(v2_result):
-                                self.v2_status_data = v2_result.get("data", {}) or {}
-                        except Exception as e:
-                            _LOGGER.warning("Dyness v2 GetStatusInfBySN nicht erreichbar: %s", e)
+                        if not self._v2_unavailable:
+                            try:
+                                v2_result = await self._call_v2(
+                                    session, "/v2/GetStatusInfBySN", v2_body
+                                )
+                                if _is_success(v2_result):
+                                    self.v2_status_data = v2_result.get("data", {}) or {}
+                            except Exception as e:
+                                _LOGGER.debug("Dyness v2 GetStatusInfBySN: %s", e)
 
                     # ── Leistungsdaten (bei jedem Update) ────────────────────
                     # UpdateFailed nur noch bei Totalausfall.
