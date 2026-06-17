@@ -259,12 +259,15 @@ class DynessDataCoordinator(DataUpdateCoordinator):
         self.realtime_data = {}
         self.module_data: dict[str, dict] = {}  # mid → Sensordaten
         self.running_data: dict = {}             # getLastRunningDataBySn
+        self.v2_realtime_data: dict = {}         # GetRealTimeDataBySN (v2)
+        self.v2_status_data: dict = {}           # GetStatusInfBySN (v2)
 
         self._bound: bool = False
         self._bound_sns: set = set()  # Bereits gebundene Sub-Modul SNs
         self._module_sns: list[str] = []
         self._last_call_time: float = 0.0
         self._storage_list_cycle: int = 0  # Zähler für storage/list Throttling
+        self._v2_cycle: int = 0            # Zähler für v2-API Throttling
 
     async def _call(self, session: aiohttp.ClientSession, path: str, body_dict: dict) -> dict:
         """Rate-limitierter API-Aufruf mit Retry bei HTTP 429."""
@@ -293,6 +296,40 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                     return json.loads(raw_text)
             except aiohttp.ClientError as e:
                 _LOGGER.warning("Dyness %s Verbindungsfehler (Versuch %d/%d): %s",
+                                path, attempt + 1, _MAX_RETRIES, e)
+                if attempt < _MAX_RETRIES:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise
+        return {}
+
+    async def _call_v2(self, session: aiohttp.ClientSession, path: str, body_dict: dict) -> dict:
+        """Rate-limitierter v2-API-Aufruf (URL-Prefix ohne Bindestrich)."""
+        elapsed = time.monotonic() - self._last_call_time
+        if elapsed < _MIN_CALL_INTERVAL:
+            await asyncio.sleep(_MIN_CALL_INTERVAL - elapsed)
+        url = f"{self.api_base}/openapi/emsdevice{path}"
+        body = json.dumps(body_dict, separators=(',', ':'))
+        for attempt in range(_MAX_RETRIES + 1):
+            self._last_call_time = time.monotonic()
+            headers = _build_headers(self.api_id, self.api_secret, body, path)
+            try:
+                async with session.post(url, headers=headers, data=body) as response:
+                    if response.status == 429:
+                        wait = _RATE_LIMIT_BACKOFF * (2 ** attempt)
+                        _LOGGER.warning(
+                            "Dyness v2: Rate-Limit (429) auf %s – Retry %d/%d in %ds",
+                            path, attempt + 1, _MAX_RETRIES, wait,
+                        )
+                        if attempt < _MAX_RETRIES:
+                            await asyncio.sleep(wait)
+                            continue
+                        return {}
+                    raw_text = await response.text()
+                    _LOGGER.debug("Dyness v2 %s: %s", path, raw_text)
+                    return json.loads(raw_text)
+            except aiohttp.ClientError as e:
+                _LOGGER.warning("Dyness v2 %s Verbindungsfehler (Versuch %d/%d): %s",
                                 path, attempt + 1, _MAX_RETRIES, e)
                 if attempt < _MAX_RETRIES:
                     await asyncio.sleep(2 ** attempt)
@@ -528,6 +565,29 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                             )
                     except Exception as e:
                         _LOGGER.warning("Dyness getLastRunningDataBySn nicht erreichbar: %s", e)
+
+                    # ── v2 API Daten (alle 3 Zyklen) ─────────────────────────
+                    self._v2_cycle = (self._v2_cycle + 1) % 3
+                    if self._v2_cycle == 0 or not self.v2_realtime_data:
+                        try:
+                            v2_body = {"sn": self.device_sn}
+                            v2_result = await self._call_v2(
+                                session, "/v2/GetRealTimeDataBySN", v2_body
+                            )
+                            if _is_success(v2_result):
+                                self.v2_realtime_data = v2_result.get("data", {}) or {}
+                        except Exception as e:
+                            _LOGGER.warning("Dyness v2 GetRealTimeDataBySN nicht erreichbar: %s", e)
+
+                        try:
+                            v2_body = {"sn": self.device_sn}
+                            v2_result = await self._call_v2(
+                                session, "/v2/GetStatusInfBySN", v2_body
+                            )
+                            if _is_success(v2_result):
+                                self.v2_status_data = v2_result.get("data", {}) or {}
+                        except Exception as e:
+                            _LOGGER.warning("Dyness v2 GetStatusInfBySN nicht erreichbar: %s", e)
 
                     # ── Leistungsdaten (bei jedem Update) ────────────────────
                     # UpdateFailed nur noch bei Totalausfall.
@@ -1063,16 +1123,6 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                     except (ValueError, TypeError):
                         pass
 
-                    try:
-                        power = float(data.get("realTimePower") or 0)
-                        data["batteryStatus"] = (
-                            "Charging"    if power >  10 else
-                            "Discharging" if power < -10 else
-                            "Standby"
-                        )
-                    except (ValueError, TypeError):
-                        pass
-
                     # ── getLastRunningDataBySn Felder ─────────────────────────
                     rd = self.running_data
                     if rd:
@@ -1083,7 +1133,6 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                         for key, rdkey in [
                             ("pvPower",       "pvPower"),
                             ("loadPower",     "loadPower"),
-                            ("gridPower",     "activePower"),
                             ("pv1Power",      "pv1Power"),
                             ("pv2Power",      "pv2Power"),
                             ("pv3Power",      "pv3Power"),
@@ -1092,6 +1141,11 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                             v = _to_float(rd.get(rdkey))
                             if v is not None:
                                 data[key] = v
+
+                        # gridPower: API positive=exporting, negate for HA convention (positive=importing)
+                        gp = _to_float(rd.get("gridPower"))
+                        if gp is not None:
+                            data["gridPower"] = -gp
 
                         # Energie
                         for key, rdkey in [
@@ -1157,6 +1211,61 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                             bp = _to_float(rd.get("batteryPower"))
                             if bp is not None:
                                 data["realTimePower"] = bp
+
+                        # Extra fields from running_data
+                        bv = _to_float(rd.get("batteryVoltage"))
+                        if bv is not None:
+                            data["batteryVoltage"] = bv
+                        bc = rd.get("batteryCount")
+                        if bc is not None:
+                            data["batteryCount"] = bc
+                        if data.get("soh") is None:
+                            soh_rd = _to_float(rd.get("batterySoh"))
+                            if soh_rd is not None:
+                                data["soh"] = soh_rd
+                        if data.get("temp") is None:
+                            t_rd = _to_float(rd.get("batteryTemperature"))
+                            if t_rd is not None:
+                                data["temp"] = t_rd
+
+                    # Battery status — recalculated after running_data applied
+                    try:
+                        power = float(data.get("realTimePower") or 0)
+                        data["batteryStatus"] = (
+                            "Charging"    if power >  10 else
+                            "Discharging" if power < -10 else
+                            "Standby"
+                        )
+                    except (ValueError, TypeError):
+                        pass
+
+                    # ── v2 API Felder ─────────────────────────────────────────
+                    if self.v2_realtime_data:
+                        for key, v2key in [
+                            ("backupLoadPower",    "backupLoadPower"),
+                            ("thirdPartyInvPower", "thirdPartyInvPower"),
+                            ("inverterTotalPower", "inverterTotalPower"),
+                            ("reactivePower",      "reactivePower"),
+                            ("apparentPower",      "apparentPower"),
+                            ("sparePower",         "sparePower"),
+                            ("powerLimitActive",   "powerLimitActive"),
+                        ]:
+                            v = _to_float(self.v2_realtime_data.get(v2key))
+                            if v is not None:
+                                data[key] = v
+
+                    if self.v2_status_data:
+                        for key, v2key in [
+                            ("onGridDischargeDepth",      "onGridDischargeDepth"),
+                            ("offGridDischargeDepth",     "offGridDischargeDepth"),
+                            ("bmsCommunicationStatus",    "bmsCommunicationStatus"),
+                            ("bmsSoftwareVersion",        "bmsSoftwareVersion"),
+                            ("meterType",                 "meterType"),
+                            ("meterCommunicationStatus",  "meterCommunicationStatus"),
+                        ]:
+                            v = self.v2_status_data.get(v2key)
+                            if v is not None:
+                                data[key] = v
 
                     # ── Alarm-Text Dekodierung ────────────────────────────────
                     _ALARM_BITS_1 = {
@@ -1243,6 +1352,23 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                         bal = rt.get("4000")
                         if bal is not None:
                             data["balancingStatus"] = str(bal) != "0"
+
+                    # ── Cygni battery energy totals (realTime/data points) ────
+                    if schema == SCHEMA_CYGNI:
+                        rt = self.realtime_data
+                        if rt:
+                            bct = _to_float(rt.get("195-196"))
+                            bdt = _to_float(rt.get("198-199"))
+                            bcd = _to_float(rt.get("197"))
+                            bdd = _to_float(rt.get("200"))
+                            if bct is not None:
+                                data["batteryChargeTotal"]    = bct
+                            if bdt is not None:
+                                data["batteryDischargeTotal"] = bdt
+                            if bcd is not None:
+                                data["batteryChargeToday"]    = bcd
+                            if bdd is not None:
+                                data["batteryDischargeToday"] = bdd
 
                     # ── Modul-Daten anhängen ──────────────────────────────────
                     n_modules = max(len(self._module_sns), 1)

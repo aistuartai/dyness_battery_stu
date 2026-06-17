@@ -265,6 +265,66 @@
       "pv3_power": {
         "name": "PV String 3 Power"
       },
+      "pv4_power": {
+        "name": "PV String 4 Power"
+      },
+      "battery_charge_total": {
+        "name": "Battery Charged Total"
+      },
+      "battery_discharge_total": {
+        "name": "Battery Discharged Total"
+      },
+      "battery_charge_today": {
+        "name": "Today Battery Charge"
+      },
+      "battery_discharge_today": {
+        "name": "Today Battery Discharge"
+      },
+      "battery_voltage": {
+        "name": "Battery Voltage"
+      },
+      "battery_count": {
+        "name": "Battery Module Count"
+      },
+      "backup_load_power": {
+        "name": "Backup Load Power"
+      },
+      "third_party_inv_power": {
+        "name": "Third Party Inverter Power"
+      },
+      "inverter_total_power": {
+        "name": "Inverter Total Power"
+      },
+      "reactive_power": {
+        "name": "Reactive Power"
+      },
+      "apparent_power": {
+        "name": "Apparent Power"
+      },
+      "spare_power": {
+        "name": "Spare Power"
+      },
+      "power_limit_active": {
+        "name": "Power Limit Active"
+      },
+      "on_grid_discharge_depth": {
+        "name": "On-Grid Discharge Depth"
+      },
+      "off_grid_discharge_depth": {
+        "name": "Off-Grid Discharge Depth"
+      },
+      "bms_communication_status": {
+        "name": "BMS Communication Status"
+      },
+      "bms_software_version": {
+        "name": "BMS Software Version"
+      },
+      "meter_type": {
+        "name": "Meter Type"
+      },
+      "meter_communication_status": {
+        "name": "Meter Communication Status"
+      },
       "pv_energy_today": {
         "name": "Today PV Yield"
       },

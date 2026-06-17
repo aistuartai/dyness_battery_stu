@@ -4,6 +4,7 @@ from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, Sen
 from homeassistant.const import (
     PERCENTAGE, UnitOfPower, UnitOfElectricCurrent, UnitOfEnergy,
     UnitOfTemperature, UnitOfElectricPotential, UnitOfFrequency,
+    UnitOfReactivePower, UnitOfApparentPower,
 )
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -55,6 +56,7 @@ SENSORS = [
     ("pv1Power",           "pv1_power",            UnitOfPower.WATT,               SensorDeviceClass.POWER,       SensorStateClass.MEASUREMENT,      "mdi:solar-panel",            None, None),
     ("pv2Power",           "pv2_power",            UnitOfPower.WATT,               SensorDeviceClass.POWER,       SensorStateClass.MEASUREMENT,      "mdi:solar-panel",            None, None),
     ("pv3Power",           "pv3_power",            UnitOfPower.WATT,               SensorDeviceClass.POWER,       SensorStateClass.MEASUREMENT,      "mdi:solar-panel",            None, None),
+    ("pv4Power",           "pv4_power",            UnitOfPower.WATT,               SensorDeviceClass.POWER,       SensorStateClass.MEASUREMENT,      "mdi:solar-panel",            None, None),
     ("pvEnergyToday",      "pv_energy_today",      UnitOfEnergy.KILO_WATT_HOUR,    SensorDeviceClass.ENERGY,      SensorStateClass.TOTAL_INCREASING, "mdi:solar-power",            None, None),
     ("loadEnergyToday",    "load_energy_today",    UnitOfEnergy.KILO_WATT_HOUR,    SensorDeviceClass.ENERGY,      SensorStateClass.TOTAL_INCREASING, "mdi:home-lightning-bolt",    None, None),
     ("gridImportToday",    "grid_import_today",    UnitOfEnergy.KILO_WATT_HOUR,    SensorDeviceClass.ENERGY,      SensorStateClass.TOTAL_INCREASING, "mdi:transmission-tower",     None, None),
@@ -91,6 +93,28 @@ SENSORS = [
     ("tempMosfet",             "temp_mosfet",            UnitOfTemperature.CELSIUS,    SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT,      "mdi:thermometer",            None, None),
     ("tempBmsMax",             "temp_bms_max",           UnitOfTemperature.CELSIUS,    SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT,      "mdi:thermometer",            None, None),
     ("tempBmsMin",             "temp_bms_min",           UnitOfTemperature.CELSIUS,    SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT,      "mdi:thermometer",            None, None),
+    # ── Cygni battery energy totals (for HA Energy Dashboard) ───────────────
+    ("batteryChargeTotal",     "battery_charge_total",    UnitOfEnergy.KILO_WATT_HOUR,  SensorDeviceClass.ENERGY,         SensorStateClass.TOTAL_INCREASING, "mdi:battery-charging-100",   None, None),
+    ("batteryDischargeTotal",  "battery_discharge_total", UnitOfEnergy.KILO_WATT_HOUR,  SensorDeviceClass.ENERGY,         SensorStateClass.TOTAL_INCREASING, "mdi:battery-minus-outline",  None, None),
+    ("batteryChargeToday",     "battery_charge_today",    UnitOfEnergy.KILO_WATT_HOUR,  SensorDeviceClass.ENERGY,         SensorStateClass.TOTAL_INCREASING, "mdi:battery-charging",       None, None),
+    ("batteryDischargeToday",  "battery_discharge_today", UnitOfEnergy.KILO_WATT_HOUR,  SensorDeviceClass.ENERGY,         SensorStateClass.TOTAL_INCREASING, "mdi:battery-minus",          None, None),
+    # ── Additional running_data sensors ──────────────────────────────────────
+    ("batteryVoltage",         "battery_voltage",         UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE,        SensorStateClass.MEASUREMENT,      "mdi:sine-wave",              1,    None),
+    ("batteryCount",           "battery_count",           None,                         None,                             None,                              "mdi:battery-multiple",       None, _D),
+    # ── v2 API sensors ────────────────────────────────────────────────────────
+    ("backupLoadPower",          "backup_load_power",          UnitOfPower.WATT,                 SensorDeviceClass.POWER,          SensorStateClass.MEASUREMENT,      "mdi:home-battery",           None, None),
+    ("thirdPartyInvPower",       "third_party_inv_power",      UnitOfPower.WATT,                 SensorDeviceClass.POWER,          SensorStateClass.MEASUREMENT,      "mdi:solar-power-variant",    None, None),
+    ("inverterTotalPower",       "inverter_total_power",       UnitOfPower.WATT,                 SensorDeviceClass.POWER,          SensorStateClass.MEASUREMENT,      "mdi:home-lightning-bolt",    None, None),
+    ("reactivePower",            "reactive_power",             UnitOfReactivePower.VOLT_AMPERE_REACTIVE, SensorDeviceClass.REACTIVE_POWER, SensorStateClass.MEASUREMENT, "mdi:sine-wave",       None, None),
+    ("apparentPower",            "apparent_power",             UnitOfApparentPower.VOLT_AMPERE,  SensorDeviceClass.APPARENT_POWER, SensorStateClass.MEASUREMENT,      "mdi:sine-wave",              None, None),
+    ("sparePower",               "spare_power",                UnitOfPower.WATT,                 SensorDeviceClass.POWER,          SensorStateClass.MEASUREMENT,      "mdi:lightning-bolt",         None, _D),
+    ("powerLimitActive",         "power_limit_active",         None,                             None,                             None,                              "mdi:speedometer",            None, _D),
+    ("onGridDischargeDepth",     "on_grid_discharge_depth",    PERCENTAGE,                       None,                             SensorStateClass.MEASUREMENT,      "mdi:battery-arrow-down",     None, _D),
+    ("offGridDischargeDepth",    "off_grid_discharge_depth",   PERCENTAGE,                       None,                             SensorStateClass.MEASUREMENT,      "mdi:battery-arrow-down",     None, _D),
+    ("bmsCommunicationStatus",   "bms_communication_status",   None,                             None,                             None,                              "mdi:lan-connect",            None, _D),
+    ("bmsSoftwareVersion",       "bms_software_version",       None,                             None,                             None,                              "mdi:chip",                   None, _D),
+    ("meterType",                "meter_type",                 None,                             None,                             None,                              "mdi:meter-electric",         None, _D),
+    ("meterCommunicationStatus", "meter_communication_status", None,                             None,                             None,                              "mdi:lan-connect",            None, _D),
     # ── Diagnose ─────────────────────────────────────────────────────────────
     ("createTime",             "last_update",            None,                         None,                          None,                              "mdi:clock-outline",          None, _D),
     ("batteryCapacity",        "battery_capacity",       UnitOfEnergy.KILO_WATT_HOUR,  SensorDeviceClass.ENERGY,      None,                              "mdi:battery",                None, _D),
@@ -103,6 +127,13 @@ ALWAYS_REGISTER = {
     "soc", "realTimePower", "realTimeCurrent", "createTime",
     "batteryCapacity", "deviceCommunicationStatus", "firmwareVersion",
     "workStatus", "batteryStatus",
+    "pvPower", "loadPower", "gridPower",
+    "pvEnergyToday", "loadEnergyToday", "gridImportToday", "gridExportToday",
+    "pvEnergyTotal", "loadEnergyTotal", "gridImportTotal", "gridExportTotal",
+    "batteryChargeTotal", "batteryDischargeTotal",
+    "batteryChargeToday", "batteryDischargeToday",
+    "tempInternal", "tempModule", "tempHeatSink",
+    "gridStatus", "runModel", "gridVoltage", "gridCurrent", "gridFrequency",
 }
 
 # Alarm-Sensoren die nur für bestimmte Schemas implementiert sind.
