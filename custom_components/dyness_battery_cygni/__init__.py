@@ -19,7 +19,7 @@ from homeassistant.const import Platform
 
 _LOGGER = logging.getLogger(__name__)
 
-DOMAIN = "dyness_battery"
+DOMAIN = "dyness_battery_cygni"
 PLATFORMS = [Platform.SENSOR]
 
 # Entitäten die in früheren Versionen existierten aber entfernt wurden.
