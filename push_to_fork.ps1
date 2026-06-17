@@ -5,13 +5,13 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-git add custom_components\
-
 $status = git status --porcelain
 if (-not $status) {
     Write-Host "Nothing to commit — working tree clean."
     exit 0
 }
+
+git add custom_components push_to_fork.ps1 reset_fork.ps1
 
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm"
 git commit -m "chore: Stu customisations [$timestamp]"
