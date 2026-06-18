@@ -404,8 +404,8 @@ class DynessDataCoordinator(DataUpdateCoordinator):
             if group_num not in (1, 2, 3, 4):
                 raise HomeAssistantError(f"group must be 1-4, got {group_num}")
             power = int(g.get("power", 0))
-            if not 0 <= power <= 2000:
-                raise HomeAssistantError(f"power must be 0-2000W, got {power}")
+            if not 0 <= power <= 10000:
+                raise HomeAssistantError(f"power must be 0-10000W, got {power}")
             dod = int(g.get("dod", 20))
             if not 0 <= dod <= 95:
                 raise HomeAssistantError(f"dod must be 0-95%, got {dod}")

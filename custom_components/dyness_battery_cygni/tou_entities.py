@@ -280,7 +280,7 @@ def TouPowerNumber(coordinator, entry, group: int) -> _TouNumber:
     return _TouNumber(
         coordinator, entry, group,
         suffix="power", ref_key=f"g{group}_power",
-        min_v=0, max_v=2000, step=100,
+        min_v=0, max_v=10000, step=100,
         unit=UnitOfPower.WATT, icon="mdi:lightning-bolt",
         tk=f"tou_g{group}_power", default=_DEFAULT_POWER,
     )
