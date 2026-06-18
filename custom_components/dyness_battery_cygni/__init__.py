@@ -414,15 +414,15 @@ class DynessDataCoordinator(DataUpdateCoordinator):
                 raise HomeAssistantError(f"soc_max must be 10-100%, got {soc_max}")
             api_groups.append({
                 "batteryWorkGroup": group_num,
-                "state":            "0" if g.get("enabled", True) else "1",
+                "state":            "1" if g.get("enabled", True) else "0",
                 "startTime":        str(g["start_time"]),
                 "endTime":          str(g["end_time"]),
                 "power":            str(power),
                 "mode":             "0" if str(g.get("mode", "charge")).lower() == "charge" else "1",
                 "week":             str(g.get("days", "0,1,2,3,4,5,6")),
-                "dodState":         "0" if g.get("dod_enabled", True) else "1",
+                "dodState":         "1" if g.get("dod_enabled", True) else "0",
                 "dod":              str(dod),
-                "socMaxChargeState": "0" if g.get("soc_max_enabled", True) else "1",
+                "socMaxChargeState": "1" if g.get("soc_max_enabled", True) else "0",
                 "batterySocMaxCharge": str(soc_max),
             })
 
