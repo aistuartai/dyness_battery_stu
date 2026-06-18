@@ -415,11 +415,6 @@ class TouStageButton(CoordinatorEntity, ButtonEntity):
                 "soc_max":         soc_max,
             })
 
-        if not any(g["enabled"] for g in groups):
-            raise HomeAssistantError(
-                "No groups are enabled. Turn on at least one group's Enabled switch before staging."
-            )
-
         self.coordinator._staged_tou = groups
         _LOGGER.info("Dyness TOU: staged %d groups for review", len(groups))
 
