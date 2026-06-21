@@ -1,6 +1,6 @@
 # Dyness Battery – Cygni Control (Personal Fork)
 
-[![Version](https://img.shields.io/badge/version-2.7.0-blue)](https://github.com/aistuartai/dyness_battery_stu/releases)
+[![Version](https://img.shields.io/badge/version-2.7.1-blue)](https://github.com/aistuartai/dyness_battery_stu/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
