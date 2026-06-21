@@ -21,6 +21,7 @@ from homeassistant.const import Platform
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "dyness_battery_cygni"
+CONF_SCAN_INTERVAL_MINUTES = "scan_interval_minutes"
 PLATFORMS = [
     Platform.SENSOR,
     Platform.SELECT,
@@ -135,14 +136,15 @@ def _detect_schema(device_model_name: str, rt: dict) -> str:
     return SCHEMA_UNKNOWN
 
 
-def _scan_interval_for_modules(n: int) -> timedelta:
-    """Dynamisches Scan-Intervall basierend auf Modulanzahl."""
+def _scan_interval_for_modules(n: int, user_min: int = 5) -> timedelta:
+    """Dynamic scan interval: user_min is the floor; module count can only push it higher."""
     if n <= 2:
-        return timedelta(minutes=5)
+        minutes = user_min
     elif n <= 4:
-        return timedelta(minutes=10)
+        minutes = max(user_min, 10)
     else:
-        return timedelta(minutes=15)
+        minutes = max(user_min, 15)
+    return timedelta(minutes=minutes)
 
 
 def _get_gmt_time() -> str:
@@ -196,6 +198,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ── Veraltete Entitäten aus der Entity-Registry entfernen ────────────────
     await _async_cleanup_stale_entities(hass, entry)
 
+    # Read scan interval from options (set via Configure), fallback to data (set at setup)
+    scan_interval_minutes = int(
+        entry.options.get(CONF_SCAN_INTERVAL_MINUTES)
+        or entry.data.get(CONF_SCAN_INTERVAL_MINUTES)
+        or 5
+    )
+
     coordinator = DynessDataCoordinator(
         hass,
         entry.data["api_id"],
@@ -203,11 +212,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data["api_base"],
         device_sn=entry.data.get("device_sn"),
         dongle_sn=entry.data.get("dongle_sn"),
+        scan_interval_minutes=scan_interval_minutes,
     )
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     async def _handle_set_tou_schedule(call) -> None:
         groups = call.data.get("groups", [])
@@ -251,6 +263,11 @@ async def _async_cleanup_stale_entities(hass: HomeAssistant, entry: ConfigEntry)
         _LOGGER.debug("Dyness: Keine veralteten Entitäten gefunden.")
 
 
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload integration when options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
@@ -261,9 +278,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class DynessDataCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass, api_id, api_secret, api_base,
-                 device_sn=None, dongle_sn=None):
+                 device_sn=None, dongle_sn=None, scan_interval_minutes=5):
+        self._user_scan_interval = scan_interval_minutes
         super().__init__(hass, _LOGGER, name=DOMAIN,
-                         update_interval=timedelta(minutes=5))
+                         update_interval=timedelta(minutes=scan_interval_minutes))
         self.api_id     = api_id
         self.api_secret = api_secret
         self.api_base   = api_base
@@ -503,7 +521,7 @@ class DynessDataCoordinator(DataUpdateCoordinator):
     def _update_scan_interval(self):
         """Passt das Scan-Intervall dynamisch an die Modulanzahl an."""
         n = len(self._module_sns)
-        new_interval = _scan_interval_for_modules(n)
+        new_interval = _scan_interval_for_modules(n, self._user_scan_interval)
         if self.update_interval != new_interval:
             self.update_interval = new_interval
             _LOGGER.info(

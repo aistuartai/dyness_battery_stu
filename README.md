@@ -1,6 +1,6 @@
 # Dyness Battery – Cygni Control (Personal Fork)
 
-[![Version](https://img.shields.io/badge/version-2.6.1-blue)](https://github.com/aistuartai/dyness_battery_stu/releases)
+[![Version](https://img.shields.io/badge/version-2.7.0-blue)](https://github.com/aistuartai/dyness_battery_stu/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
@@ -15,6 +15,22 @@
 On top of all upstream sensors, this fork adds **write control** via the Dyness v2 API — configuring the inverter directly from Home Assistant without touching the Dyness app.
 
 All settings use a **two-step Stage → Confirm** flow to prevent accidental writes to live hardware. Staging shows a persistent notification preview of the proposed changes before anything is sent to the inverter.
+
+### Configurable Polling Interval
+
+Set how often HA polls the Dyness cloud API — configurable at setup and at any time via **Settings → Integrations → Dyness Battery → Configure**.
+
+| Option | Calls/hour (1 module) | Notes |
+|--------|----------------------|-------|
+| 2 min | ~40 | Aggressive — monitor logs for 429 errors |
+| 3 min | ~27 | Recommended for 1 module |
+| **5 min** | ~16 | **Default** |
+| 10 min | ~8 | Conservative |
+| 15 min | ~5 | Minimum recommended for 3+ modules |
+
+With 3+ modules the interval is automatically raised (to 10 or 15 min) regardless of your setting, to stay within the Dyness API rate limit of ~60 calls/hour.
+
+Changing the interval triggers an automatic integration reload — no HA restart needed.
 
 ### TOU (Time of Use) Schedule
 

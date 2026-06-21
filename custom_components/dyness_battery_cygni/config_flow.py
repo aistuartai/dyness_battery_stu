@@ -3,7 +3,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 
-from . import DOMAIN, _BMS_SUFFIXES, _is_success
+from . import DOMAIN, CONF_SCAN_INTERVAL_MINUTES, _BMS_SUFFIXES, _is_success
 import hashlib
 import hmac
 import base64
@@ -62,10 +62,13 @@ def _select_bms_devices(device_list: list) -> list:
     return bms_devices if bms_devices else device_list
 
 
+SCAN_INTERVAL_OPTIONS = [2, 3, 5, 10, 15]
+
 STEP_USER_DATA_SCHEMA = vol.Schema({
     vol.Required("api_id"): str,
     vol.Required("api_secret"): str,
     vol.Required("region", default="europe"): vol.In(["europe", "apac"]),
+    vol.Required(CONF_SCAN_INTERVAL_MINUTES, default=5): vol.In(SCAN_INTERVAL_OPTIONS),
 })
 
 
@@ -80,6 +83,11 @@ class DynessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._api_base = None
         self._devices = []      # alle gefundenen Geräte
         self._region = "europe"
+        self._scan_interval_minutes = 5
+
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        return DynessOptionsFlowHandler(config_entry)
 
     async def async_step_user(self, user_input=None) -> FlowResult:
         """Schritt 1: API-Zugangsdaten + Region."""
@@ -90,6 +98,7 @@ class DynessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._api_secret = user_input["api_secret"]
             self._region     = user_input["region"]
             self._api_base   = API_REGIONS[self._region]
+            self._scan_interval_minutes = user_input.get(CONF_SCAN_INTERVAL_MINUTES, 5)
 
             device_list = await _fetch_device_list(
                 self._api_id, self._api_secret, self._api_base
@@ -165,6 +174,7 @@ class DynessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "api_base":   self._api_base,
                 "device_sn":  sn,
                 "dongle_sn":  device.get("collectorSn") or None,
+                CONF_SCAN_INTERVAL_MINUTES: self._scan_interval_minutes,
             },
         )
 
@@ -201,3 +211,26 @@ class DynessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=schema,
             errors=errors,
         )
+
+
+class DynessOptionsFlowHandler(config_entries.OptionsFlow):
+    """Options flow — allows changing polling interval after initial setup."""
+
+    def __init__(self, config_entry):
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current = int(
+            self._config_entry.options.get(CONF_SCAN_INTERVAL_MINUTES)
+            or self._config_entry.data.get(CONF_SCAN_INTERVAL_MINUTES)
+            or 5
+        )
+
+        schema = vol.Schema({
+            vol.Required(CONF_SCAN_INTERVAL_MINUTES, default=current): vol.In(SCAN_INTERVAL_OPTIONS),
+        })
+
+        return self.async_show_form(step_id="init", data_schema=schema)
